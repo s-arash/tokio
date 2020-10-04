@@ -1,4 +1,4 @@
-#![cfg(feature = "full")]
+#![cfg(any(feature = "full", feature = "full-sgx"))]
 
 use std::sync::Arc;
 use tokio::sync::Semaphore;

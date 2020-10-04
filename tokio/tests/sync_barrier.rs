@@ -1,6 +1,6 @@
 #![allow(clippy::unnecessary_operation)]
 #![warn(rust_2018_idioms)]
-#![cfg(feature = "full")]
+#![cfg(any(feature = "full", feature = "full-sgx"))]
 
 use tokio::sync::Barrier;
 
