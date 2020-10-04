@@ -1,15 +1,9 @@
 #![allow(clippy::redundant_clone)]
 #![warn(rust_2018_idioms)]
-#![cfg(feature = "sync")]
+#![cfg(any(feature = "full", feature = "full-sgx"))]
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_test::wasm_bindgen_test as test;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_test::wasm_bindgen_test as maybe_tokio_test;
-
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::test as maybe_tokio_test;
-
+use std::thread;
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 use tokio_test::*;

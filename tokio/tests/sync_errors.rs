@@ -1,8 +1,5 @@
 #![warn(rust_2018_idioms)]
-#![cfg(feature = "sync")]
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_test::wasm_bindgen_test as test;
+#![cfg(any(feature = "full", feature = "full-sgx"))]
 
 fn is_error<T: std::error::Error + Send + Sync>() {}
 

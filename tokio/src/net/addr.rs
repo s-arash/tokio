@@ -1,4 +1,7 @@
-use std::future;
+use crate::future;
+
+#[cfg(target_env = "sgx")]
+use std::iter;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
@@ -39,9 +42,17 @@ where
 {
     type Iter = T::Iter;
     type Future = T::Future;
+    #[cfg(target_env = "sgx")]
+    type StringIter = T::StringIter;
+
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         (**self).to_socket_addrs(sealed::Internal)
+    }
+
+    #[cfg(target_env = "sgx")]
+    fn to_string_addrs(&self) -> Self::StringIter {
+        (**self).to_string_addrs()
     }
 }
 
@@ -52,10 +63,12 @@ impl ToSocketAddrs for SocketAddr {}
 impl sealed::ToSocketAddrsPriv for SocketAddr {
     type Iter = std::option::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = iter::Once<String>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         let iter = Some(*self).into_iter();
-        future::ready(Ok(iter))
+        future::ok(iter)
     }
 }
 
@@ -66,9 +79,16 @@ impl ToSocketAddrs for SocketAddrV4 {}
 impl sealed::ToSocketAddrsPriv for SocketAddrV4 {
     type Iter = std::option::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = iter::Once<String>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         SocketAddr::V4(*self).to_socket_addrs(sealed::Internal)
+    }
+
+    #[cfg(target_env = "sgx")]
+    fn to_string_addrs(&self) -> Self::StringIter {
+        iter::once(self.to_string())
     }
 }
 
@@ -79,9 +99,16 @@ impl ToSocketAddrs for SocketAddrV6 {}
 impl sealed::ToSocketAddrsPriv for SocketAddrV6 {
     type Iter = std::option::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = iter::Once<String>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         SocketAddr::V6(*self).to_socket_addrs(sealed::Internal)
+    }
+
+    #[cfg(target_env = "sgx")]
+    fn to_string_addrs(&self) -> Self::StringIter {
+        iter::once(self.to_string())
     }
 }
 
@@ -92,10 +119,12 @@ impl ToSocketAddrs for (IpAddr, u16) {}
 impl sealed::ToSocketAddrsPriv for (IpAddr, u16) {
     type Iter = std::option::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = iter::Once<String>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         let iter = Some(SocketAddr::from(*self)).into_iter();
-        future::ready(Ok(iter))
+        future::ok(iter)
     }
 }
 
@@ -106,10 +135,17 @@ impl ToSocketAddrs for (Ipv4Addr, u16) {}
 impl sealed::ToSocketAddrsPriv for (Ipv4Addr, u16) {
     type Iter = std::option::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = iter::Once<String>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         let (ip, port) = *self;
         SocketAddrV4::new(ip, port).to_socket_addrs(sealed::Internal)
+    }
+
+    #[cfg(target_env = "sgx")]
+    fn to_string_addrs(&self) -> Self::StringIter {
+        iter::once(SocketAddr::from(*self).to_string())
     }
 }
 
@@ -120,39 +156,50 @@ impl ToSocketAddrs for (Ipv6Addr, u16) {}
 impl sealed::ToSocketAddrsPriv for (Ipv6Addr, u16) {
     type Iter = std::option::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = iter::Once<String>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
         let (ip, port) = *self;
         SocketAddrV6::new(ip, port, 0, 0).to_socket_addrs(sealed::Internal)
     }
+
+    #[cfg(target_env = "sgx")]
+    fn to_string_addrs(&self) -> Self::StringIter {
+        iter::once(SocketAddr::from(*self).to_string())
+    }
 }
 
 // ===== impl &[SocketAddr] =====
 
+#[cfg(target_env = "sgx")]
+#[derive(Debug)]
+pub struct ToStringIter<I>(I);
+
+#[cfg(target_env = "sgx")]
+impl<T, I> Iterator for ToStringIter<I>
+where
+    I: Iterator<Item = T>,
+    T: ToString,
+{
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|t| t.to_string())
+    }
+}
+
 impl ToSocketAddrs for &[SocketAddr] {}
 
-impl sealed::ToSocketAddrsPriv for &[SocketAddr] {
+impl<'a> sealed::ToSocketAddrsPriv for &'a [SocketAddr] {
     type Iter = std::vec::IntoIter<SocketAddr>;
     type Future = ReadyFuture<Self::Iter>;
+    #[cfg(target_env = "sgx")]
+    type StringIter = ToStringIter<std::slice::Iter<'a, SocketAddr>>;
 
     fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
-        #[inline]
-        fn slice_to_vec(addrs: &[SocketAddr]) -> Vec<SocketAddr> {
-            addrs.to_vec()
-        }
-
-        // This uses a helper method because clippy doesn't like the `to_vec()`
-        // call here (it will allocate, whereas `self.iter().copied()` would
-        // not), but it's actually necessary in order to ensure that the
-        // returned iterator is valid for the `'static` lifetime, which the
-        // borrowed `slice::Iter` iterator would not be.
-        //
-        // Note that we can't actually add an `allow` attribute for
-        // `clippy::unnecessary_to_owned` here, as Tokio's CI runs clippy lints
-        // on Rust 1.52 to avoid breaking LTS releases of Tokio. Users of newer
-        // Rust versions who see this lint should just ignore it.
-        let iter = slice_to_vec(self).into_iter();
-        future::ready(Ok(iter))
+        let iter = self.to_vec().into_iter();
+        future::ok(iter)
     }
 }
 
@@ -164,6 +211,8 @@ cfg_net! {
     impl sealed::ToSocketAddrsPriv for str {
         type Iter = sealed::OneOrMore;
         type Future = sealed::MaybeReady;
+        #[cfg(target_env = "sgx")]
+        type StringIter = iter::Once<String>;
 
         fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
             use crate::blocking::spawn_blocking;
@@ -183,6 +232,11 @@ cfg_net! {
                 std::net::ToSocketAddrs::to_socket_addrs(&s)
             })))
         }
+
+        #[cfg(target_env = "sgx")]
+        fn to_string_addrs(&self) -> Self::StringIter {
+            iter::once(self.to_owned())
+        }
     }
 
     // ===== impl (&str, u16) =====
@@ -192,6 +246,8 @@ cfg_net! {
     impl sealed::ToSocketAddrsPriv for (&str, u16) {
         type Iter = sealed::OneOrMore;
         type Future = sealed::MaybeReady;
+        #[cfg(target_env = "sgx")]
+        type StringIter = iter::Once<String>;
 
         fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
             use crate::blocking::spawn_blocking;
@@ -220,6 +276,11 @@ cfg_net! {
                 std::net::ToSocketAddrs::to_socket_addrs(&(&host[..], port))
             })))
         }
+
+        #[cfg(target_env = "sgx")]
+        fn to_string_addrs(&self) -> Self::StringIter {
+            iter::once(format!("{}:{}", self.0, self.1))
+        }
     }
 
     // ===== impl (String, u16) =====
@@ -229,9 +290,16 @@ cfg_net! {
     impl sealed::ToSocketAddrsPriv for (String, u16) {
         type Iter = sealed::OneOrMore;
         type Future = sealed::MaybeReady;
+        #[cfg(target_env = "sgx")]
+        type StringIter = iter::Once<String>;
 
         fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
             (self.0.as_str(), self.1).to_socket_addrs(sealed::Internal)
+        }
+
+        #[cfg(target_env = "sgx")]
+        fn to_string_addrs(&self) -> Self::StringIter {
+            iter::once(format!("{}:{}", self.0, self.1))
         }
     }
 
@@ -242,9 +310,16 @@ cfg_net! {
     impl sealed::ToSocketAddrsPriv for String {
         type Iter = <str as sealed::ToSocketAddrsPriv>::Iter;
         type Future = <str as sealed::ToSocketAddrsPriv>::Future;
+        #[cfg(target_env = "sgx")]
+        type StringIter = iter::Once<String>;
 
         fn to_socket_addrs(&self, _: sealed::Internal) -> Self::Future {
             (&self[..]).to_socket_addrs(sealed::Internal)
+        }
+
+        #[cfg(target_env = "sgx")]
+        fn to_string_addrs(&self) -> Self::StringIter {
+            iter::once(self.clone())
         }
     }
 }
@@ -262,8 +337,15 @@ pub(crate) mod sealed {
     pub trait ToSocketAddrsPriv {
         type Iter: Iterator<Item = SocketAddr> + Send + 'static;
         type Future: Future<Output = io::Result<Self::Iter>> + Send + 'static;
+        #[cfg(target_env = "sgx")]
+        type StringIter: Iterator<Item = String>;
 
         fn to_socket_addrs(&self, internal: Internal) -> Self::Future;
+
+        // There is no name resolution mechanism in SGX, but bind and connect
+        // take arbitrary addresses represented as strings.
+        #[cfg(target_env = "sgx")]
+        fn to_string_addrs(&self) -> Self::StringIter;
     }
 
     #[allow(missing_debug_implementations)]
